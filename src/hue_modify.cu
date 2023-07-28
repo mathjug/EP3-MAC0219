@@ -1,3 +1,5 @@
+// Bruno Armond Braga Nusp: 12542331
+// Matheus Sanches Jurgensen Nusp: 12542199
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -65,56 +67,79 @@ void checkErrors(cudaError_t err, const char *msg) {
     }
 }
 
+void calculates_A(double hue_diff, double *A) {
+    double c = cos(2 * M_PI * hue_diff);
+    double s = sin(2 * M_PI * hue_diff);
+    double one_third = 1.0 / 3.0;
+    double sqrt_third = sqrt(one_third);
+
+    double a11 = c + one_third * (1.0 - c);
+    double a12 = one_third * (1.0 - c) - sqrt_third * s;
+    double a13 = one_third * (1.0 - c) + sqrt_third * s;
+
+    A[0] = a11;
+    A[1] = a12;
+    A[2] = a13;
+    A[4] = A[8] = A[0];
+    A[5] = A[6] = A[1];
+    A[3] = A[7] = A[2];
+}
+
 // Kernel CUDA para alteracao do hue
 // Voce deve modificar essa funcao no EP3
 __global__ void modify_hue_kernel(png_bytep d_image,
                                   int width,
                                   int height,
                                   double *A) {
-    // SEU CODIGO DO EP3 AQUI
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x < width && y < height) {
+        int index = (y * width + x) * 3;
+        png_bytep px = &(d_image[index]);
+        modify_pixel(px, A);
+    }
 }
 
 // Altera a matiz (hue) de uma imagem em paralelo
-// Voce deve modificar essa funcao no EP3
 void modify_hue(png_bytep h_image,
                 int width,
                 int height,
                 size_t image_size,
                 double hue_diff) {
-    // SEU CODIGO DO EP3 AQUI
 
-    // Voce deve completar os ... com os argumentos corretos e
-    // indicar dimensoes apropriadas para o grid e os blocos
-    // (blocos por grid e threads por bloco)
+    int size_A = 9 * sizeof(double); // matriz 3x3
+    double *h_A = (double *) malloc(size_A); // alocando matriz A no host
+    calculates_A(hue_diff, h_A);
 
-    // As mensagens nas chamadas de checkErrors, usadas pra debug,
-    // sao uma "dica" do que deve ser feito em cada chamada a funcoes CUDA
+    double *d_A;
+    cudaMalloc(&d_A, size_A);
+    checkErrors(cudaGetLastError(), "Alocacao da matriz A no device");
 
-    // cudaMalloc(...);
-    // checkErrors(cudaGetLastError(), "Alocacao da matriz A no device");
+    cudaMemcpy(d_A, h_A, size_A, cudaMemcpyHostToDevice);
+    checkErrors(cudaGetLastError(), "Copia da matriz A para o device");
 
-    // cudaMemcpy(...);
-    // checkErrors(cudaGetLastError(), "Copia da matriz A para o device");
+    png_bytep d_image;
+    cudaMalloc((void**)&d_image, image_size);
+    checkErrors(cudaGetLastError(), "Alocacao da imagem no device");
 
-    // cudaMalloc(...);
-    // checkErrors(cudaGetLastError(), "Alocacao da imagem no device");
+    cudaMemcpy(d_image, h_image, image_size, cudaMemcpyHostToDevice);
+    checkErrors(cudaGetLastError(), "Copia da imagem para o device");
 
-    // cudaMemcpy(...);
-    // checkErrors(cudaGetLastError(), "Copia da imagem para o device");
+    // blocos por grid e threads por bloco
+    dim3 dim_block(32, 32);
+    dim3 dim_grid((width + dim_block.x - 1) / dim_block.x, (height + dim_block.y - 1) / dim_block.y);
 
-    // // Determinar as dimensoes adequadas aqui
-    // dim3 dim_block(1, 1);
-    // dim3 dim_grid(1, 1);
 
-    // modify_hue_kernel<<<dim_grid, dim_block>>>
-    //     (...);
-    // checkErrors(cudaGetLastError(), "Lançamento do kernel");
+    modify_hue_kernel<<<dim_grid, dim_block>>>(d_image, width, height, d_A);
+    checkErrors(cudaGetLastError(), "Lançamento do kernel");
 
-    // cudaMemcpy(...);
-    // checkErrors(cudaGetLastError(), "Copia da imagem para o host");
+    cudaMemcpy(h_image, d_image, image_size, cudaMemcpyDeviceToHost);
+    checkErrors(cudaGetLastError(), "Copia da imagem para o host");
 
-    // cudaFree(...);
-    // cudaFree(...);
+    cudaFree(d_image);
+    cudaFree(d_A);
+    free(h_A);
 }
 
 // Le imagem png de um arquivo de entrada para a memoria
@@ -280,10 +305,10 @@ int main(int argc, char *argv[]) {
     // Processamento da imagem (alteracao do hue)
 
     // Versao sequencial:
-    modify_hue_seq(image, width, height, hue_diff);
+    //modify_hue_seq(image, width, height, hue_diff);
 
     // // Versao paralela
-    // modify_hue(image, width, height, image_size, hue_diff);
+    modify_hue(image, width, height, image_size, hue_diff);
 
     // Escrita da imagem para arquivo
     write_png_image(argv[2], image, width, height);
@@ -292,3 +317,4 @@ int main(int argc, char *argv[]) {
     free(image);
     return 0;
 }
+
